@@ -97,12 +97,12 @@ cardano-offchain-skill/
 
 Building and testing against 7 real wallet extensions and a production dApp uncovered patterns not documented elsewhere:
 
-- **`isEnabled()` lies** -- Eternl returns false after reload for authorized sites. Auto-reconnect must skip `isEnabled()` and call `enable()` directly.
+- **`isEnabled()` is unreliable** -- Eternl returns false after reload for authorized sites. Auto-reconnect must skip `isEnabled()` and call `enable()` directly.
 - **Late injection is common** -- wallet extensions inject into `window.cardano` asynchronously. A single check on page load misses wallets that arrive 200-500ms later. Retry with backoff.
 - **CBOR multi-asset gotcha** -- `getBalance()` returns a bare unsigned int for pure-ADA wallets but a CBOR array for wallets holding native tokens. Your decoder must handle both.
 - **CIP-68 changed handle encoding** -- ADA Handle migrated to CIP-68 reference tokens. The asset name now has a `000de140` prefix that must be stripped before decoding.
 - **ViewTransitions destroy React state** -- Astro's ViewTransitions unmount and remount components on navigation. Without `transition:persist`, wallet state resets silently.
-- **Koios CORS is broken server-side** -- browser-to-Koios requests fail with missing CORS headers. Must proxy through your own API.
+- **Koios CORS requires a registered account** -- browser-to-Koios requests fail without CORS headers for unregistered API accounts. Proxy through your own API.
 
 ## Sources
 

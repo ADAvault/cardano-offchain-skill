@@ -191,15 +191,16 @@ Content-Security-Policy: script-src 'self' 'unsafe-eval';
 
 ## API / Network
 
-### G-A1: Koios CORS Bug (#397)
+### G-A1: Koios CORS (Unregistered Accounts)
 
 **Symptom**: Browser fetch to `api.koios.rest` fails with CORS error.
 
-**Root cause**: Koios public API does not send `Access-Control-Allow-Origin` headers.
+**Root cause**: Koios public API does not send CORS headers for unregistered accounts.
+Registering for a Koios API account resolves this, but proxying is more resilient.
 See [koios-artifacts #397](https://github.com/cardano-community/koios-artifacts/issues/397).
 
-**Fix**: Proxy Koios requests through your own API server, which adds proper CORS
-headers.
+**Fix**: Either register for a Koios API account, or proxy requests through your
+own API server which adds proper CORS headers.
 
 ### G-A2: Express Owns CORS, Not nginx
 

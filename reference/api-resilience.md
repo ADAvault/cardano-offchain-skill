@@ -101,10 +101,11 @@ try {
 }
 ```
 
-## Koios CORS Bug
+## Koios CORS (Unregistered Accounts)
 
-The Koios public API (https://api.koios.rest) does not send proper CORS headers,
-causing browsers to reject direct requests. This is a known issue:
+The Koios public API does not send proper CORS headers for unregistered accounts,
+causing browsers to reject direct requests. Registering for a Koios API account
+resolves this, but proxying through your own API is more resilient. See:
 [koios-artifacts #397](https://github.com/cardano-community/koios-artifacts/issues/397).
 
 **Solution**: Proxy Koios requests through your own API:

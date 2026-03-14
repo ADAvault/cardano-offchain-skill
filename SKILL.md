@@ -251,7 +251,7 @@ Hard-won learnings from production wallet integration:
 - **Module-level singleton** -- shared wallet state at module scope avoids duplicate connections when multiple components mount. Initialize as disconnected (matches SSR).
 - **Network check before balance** -- always verify `getNetworkId()` before any other API call. Users on testnet should see a clear error, not silent failures.
 - **Dynamic MeshJS import** -- `await import('@meshsdk/core')` avoids bundling MeshJS (which has Node-only deps) into SSR output.
-- **Koios CORS bug** -- browser cannot call Koios API directly. Proxy through your own API. See [koios-artifacts #397](https://github.com/cardano-community/koios-artifacts/issues/397).
+- **Koios CORS for unregistered accounts** -- browser-to-Koios requests fail without CORS headers unless you have a registered API account. Proxy through your own API to avoid this. See [koios-artifacts #397](https://github.com/cardano-community/koios-artifacts/issues/397).
 - **MeshJS transitive vulnerabilities** -- `npm audit` flags undici/bn.js/devalue via MeshJS. Use `--audit-level=critical` and document the accepted risk.
 
 ## Reference Material
