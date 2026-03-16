@@ -329,6 +329,63 @@ it from consuming new blocks from Ogmios.
 **Fix**: Use targeted `--match` patterns with specific credentials. A single-dApp
 deployment uses ~50 MB instead of ~50 GB.
 
+### G-K5: MeshTxBuilder Evaluator Underestimates Plutus V3 Fees
+
+**Symptom**: Transaction builds successfully but Ogmios rejects with error 3122
+"Insufficient fee" on submission.
+
+**Root cause**: The Ogmios evaluator (used by MeshTxBuilder's `.complete()`)
+underestimates execution units for Plutus V3 scripts, especially on preview
+network after protocol parameter updates. The calculated fee is below the
+protocol minimum.
+
+**Fix**: Catch the 3122 error on submission, then rebuild without the evaluator
+using manual exUnits with a safety margin:
+
+```typescript
+// First attempt: use evaluator
+const txBuilder = new MeshTxBuilder({
+  fetcher: kupo, submitter: ogmios, evaluator: ogmios,
+});
+// ... build tx ...
+await txBuilder.complete();
+txBuilder.completeSigning();
+
+try {
+  return await ogmios.submitTx(txBuilder.txHex);
+} catch (err) {
+  if (err.message.includes('3122')) {
+    // Retry without evaluator, manual exUnits
+    const retry = new MeshTxBuilder({ fetcher: kupo, submitter: ogmios });
+    // ... rebuild with .mintRedeemerValue(redeemer, 'JSON', { mem: 700000, steps: 350000000 }) ...
+    await retry.complete();
+    retry.completeSigning();
+    return await ogmios.submitTx(retry.txHex);
+  }
+  throw err;
+}
+```
+
+The manual exUnits (700K mem, 350M steps) are generous for a simple minting
+policy. Adjust based on your script complexity. The actual cost is typically
+much lower, but the excess is not charged — only the real execution cost is
+deducted from the fee.
+
+### G-K6: Free-Text On-Chain Data Is an Abuse Vector
+
+**Symptom**: Users can submit arbitrary text that gets permanently stored in
+transaction metadata or inline datums on the blockchain.
+
+**Root cause**: Accepting free-text fields (description, comments) in on-chain
+data allows storage of illegal content, PII, profanity, or XSS payloads that
+appear in blockchain explorers.
+
+**Fix**: Replace free-text with generated references. Use a deterministic format
+like `[TICKER]-[SERVICE]-[YYMMDD]-[SHORT_HASH]` (e.g. `ADV-N-260316-a7b3c`).
+Store the human-readable description off-chain in your application database,
+linked by the reference. Benefits: predictable datum size, predictable fees,
+no abuse vector, still provides a correlation key for off-chain records.
+
 ---
 
 ## See Also
