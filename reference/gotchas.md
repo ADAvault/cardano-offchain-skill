@@ -511,6 +511,49 @@ is fragile because:
 
 ---
 
+### G-K10: Never Show "Success" Until the Blockchain Confirms
+
+**Symptom**: User notarizes a document, sees "Success!", clicks "View Certificate",
+gets a "Not Found" error. They panic, retry, or lose confidence in the service.
+
+**Root cause**: The API returns 202 (submitted) but the UI shows "Successfully
+Notarized". The user naturally clicks through to verify/certificate endpoints
+that depend on chain indexer data (Kupo), which takes 20-60+ seconds on
+preview/testnet and 5-30s on mainnet.
+
+**Fix — Three-state UX pattern:**
+
+```
+State 1: "Transaction Submitted" (amber spinner)
+  - Show immediately after API returns 202
+  - Display reference, tx hash, explorer link
+  - Grey out "View Certificate" — can't click to a dead link
+  - Auto-poll the certificate endpoint every 5s
+
+State 2: "Confirmed" (green checkmark)
+  - Certificate endpoint returns 200
+  - Switch to "Notarized Successfully"
+  - Enable "View Certificate" link
+  - Add to "My Notarizations" (or update pending badge)
+
+State 3: Timeout (amber info)
+  - After 2 min with no confirmation
+  - Show "Your notarization is being processed. Check back shortly."
+  - Don't show as an error — the tx was submitted, it will confirm
+```
+
+**Optimistic UI for lists:** Add the new entry to the local list immediately
+with a "pending" indicator. Replace with real data once the chain confirms.
+This prevents the jarring experience of "I just notarized but it's not in
+my list".
+
+**General principle:** On blockchains, "submitted" !== "confirmed". Any
+action that writes to the chain needs this three-state pattern. This applies
+to notarization, token minting, delegation, payments, and any smart contract
+interaction.
+
+---
+
 ## See Also
 
 - [CIP-30 Standard](cip30.md) -- wallet API details
