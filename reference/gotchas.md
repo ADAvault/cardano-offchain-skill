@@ -403,6 +403,59 @@ Store the human-readable description off-chain in your application database,
 linked by the reference. Benefits: predictable datum size, predictable fees,
 no abuse vector, still provides a correlation key for off-chain records.
 
+### G-K7: API Key Caching in localStorage Creates Stale Auth State
+
+**Symptom**: Notarization fails with "Key revoked" or "Unauthorized" even though
+the user just connected their wallet. Works after clearing localStorage.
+
+**Root cause**: Browser-cached API keys go stale when the backend revokes them
+(key rotation, force re-provision, server restart). The frontend keeps using
+the cached key, unaware it's been invalidated. This is especially problematic
+when the key provisioning endpoint revokes old keys as a side effect of creating
+new ones.
+
+**Fix**: API keys cached in `localStorage` are a temporary pattern for MVP.
+The proper solution is wallet-based authentication (CIP-30 challenge-sign),
+where the wallet IS the identity and there's no key to cache or revoke.
+
+For MVPs that must use API keys:
+- Return existing active keys on re-request instead of revoking and recreating
+- Support a `force: true` parameter for explicit re-provisioning
+- On auth failure (401/403), clear the cached key and retry once with a fresh key
+- Never revoke keys as a side effect of another operation
+
+### G-K8: Response Headers Cannot Be Set in onFinished Callbacks
+
+**Symptom**: Custom response headers (e.g. `X-Credits-Remaining`) are never
+received by the client despite being set in the Express middleware.
+
+**Root cause**: Express/Node.js `on-finished` callbacks fire after the response
+body has been flushed to the network. Calling `res.setHeader()` at that point
+is a no-op — the headers have already been sent. This affects any pattern where
+you want to include post-processing data (credits deducted, audit trail) in
+response headers.
+
+**Fix**: Include the data in the response body instead of headers. For credit
+deductions, calculate the remaining balance in the route handler before
+`res.json()`, not in the middleware's `onFinished` callback:
+
+```typescript
+// In the route handler, BEFORE sending the response:
+let creditsRemaining;
+if (req.credits) {
+  const balance = engine.getBalance(req.credits.keyId);
+  creditsRemaining = Math.max(0, balance.available - req.credits.cost);
+}
+
+res.status(202).json({
+  data: { ...result, credits_remaining: creditsRemaining },
+  meta: { timestamp: new Date().toISOString() },
+});
+
+// The middleware's onFinished handles the actual deduction
+// (which happens after the response is sent — that's fine for writes)
+```
+
 ---
 
 ## See Also
