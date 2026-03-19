@@ -329,47 +329,64 @@ it from consuming new blocks from Ogmios.
 **Fix**: Use targeted `--match` patterns with specific credentials. A single-dApp
 deployment uses ~50 MB instead of ~50 GB.
 
-### G-K5: MeshTxBuilder Evaluator Underestimates Plutus V3 Fees
+### G-K5: MeshTxBuilder Fee Calculation Underestimates by ~2K Lovelace
 
 **Symptom**: Transaction builds successfully but Ogmios rejects with error 3122
-"Insufficient fee" on submission.
+"Insufficient fee" on submission. The gap is typically 1,000-3,000 lovelace.
 
-**Root cause**: The Ogmios evaluator (used by MeshTxBuilder's `.complete()`)
-underestimates execution units for Plutus V3 scripts, especially on preview
-network after protocol parameter updates. The calculated fee is below the
-protocol minimum.
+**Root cause**: This is a **known Cardano ecosystem issue**, not MeshJS-specific.
+Fee calculation has a circular dependency: fee depends on tx size, tx size depends
+on fee (fee is embedded in the tx body), and change output depends on fee.
+MeshTxBuilder uses iterative resolution but doesn't perfectly converge. The same
+issue is documented in `cardano-serialization-lib` (#496, #441) and `cardano-node`
+(#1529).
 
-**Fix**: Catch the 3122 error on submission, then rebuild without the evaluator
-using manual exUnits with a safety margin:
+**Fix — Pattern A (simplest, production-proven)**: Set an explicit fee via `complete()`:
 
 ```typescript
-// First attempt: use evaluator
 const txBuilder = new MeshTxBuilder({
-  fetcher: kupo, submitter: ogmios, evaluator: ogmios,
+  fetcher: kupo,
+  submitter: ogmios,
+  // No evaluator — manual exUnits
 });
-// ... build tx ...
-await txBuilder.complete();
-txBuilder.completeSigning();
 
+await txBuilder
+  .mintPlutusScriptV3()
+  .mint('1', policyId, tokenName)
+  .mintingScript(scriptCbor)
+  .mintRedeemerValue(redeemer, 'JSON', { mem: 2_000_000, steps: 1_000_000_000 })
+  // ... rest of tx ...
+  .complete({ fee: '500000' });  // Explicit 0.5 ADA — excess goes to change
+
+txBuilder.completeSigning();
+const txHash = await ogmios.submitTx(txBuilder.txHex);
+```
+
+The explicit fee bypasses `calculateFee()` entirely. The Cardano protocol only
+charges the actual execution cost, not the budgeted amount. The excess fee above
+the minimum is returned as change output.
+
+**Fix — Pattern B (defensive retry)**: Build normally, catch 3122, bump fee:
+
+```typescript
 try {
-  return await ogmios.submitTx(txBuilder.txHex);
+  const txHash = await ogmios.submitTx(txBuilder.txHex);
+  return txHash;
 } catch (err) {
   if (err.message.includes('3122')) {
-    // Retry without evaluator, manual exUnits
-    const retry = new MeshTxBuilder({ fetcher: kupo, submitter: ogmios });
-    // ... rebuild with .mintRedeemerValue(redeemer, 'JSON', { mem: 700000, steps: 350000000 }) ...
-    await retry.complete();
-    retry.completeSigning();
-    return await ogmios.submitTx(retry.txHex);
+    const currentFee = BigInt(txBuilder.meshTxBuilderBody.fee);
+    await txBuilder.complete({ fee: (currentFee + 10000n).toString() });
+    txBuilder.completeSigning();
+    return await ogmios.submitTx(txBuilder.txHex);
   }
   throw err;
 }
 ```
 
-The manual exUnits (700K mem, 350M steps) are generous for a simple minting
-policy. Adjust based on your script complexity. The actual cost is typically
-much lower, but the excess is not charged — only the real execution cost is
-deducted from the fee.
+**Why generous manual exUnits help**: The fee formula includes
+`priceStep * totalSteps + priceMem * totalMem`. Generous exUnits inflate
+the calculated fee, naturally providing padding. This is why the CIP-113
+programmable-tokens tests (15M total mem budget) never hit the issue.
 
 ### G-K6: Free-Text On-Chain Data Is an Abuse Vector
 
