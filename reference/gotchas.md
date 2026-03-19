@@ -456,6 +456,59 @@ res.status(202).json({
 // (which happens after the response is sent — that's fine for writes)
 ```
 
+### G-K9: Never Verify On-Chain Payments Synchronously
+
+**Symptom**: User sends ADA to a payment address, frontend retries verification
+in a loop, times out, shows an error — but the payment actually confirmed and
+the credits were never granted. User loses money.
+
+**Root cause**: Cardano block times are non-deterministic (Poisson distribution).
+Preview blocks average 20s but can take 60s+. Kupo indexing adds additional
+latency. A synchronous retry loop (even with generous timeouts) will eventually
+fail for some users.
+
+**Fix — Decouple submission from verification:**
+
+```
+Frontend                    Backend                     Background Job
+   |                           |                              |
+   |-- Submit tx via wallet -->|                              |
+   |                           |                              |
+   |-- POST /topup {tx_hash} ->|                              |
+   |                           |-- Store pending_topup ------->|
+   |<- 202 "Payment pending"   |                              |
+   |                           |                              |
+   |-- Poll GET /status ------>|                              |
+   |                           |     (every 30s)              |
+   |                           |     Query Kupo for tx ------->|
+   |                           |     If confirmed:            |
+   |                           |       Credit wallet          |
+   |                           |       Delete pending         |
+   |                           |     If expired (>30 min):    |
+   |                           |       Mark failed            |
+   |                           |                              |
+   |<- 200 {credits: updated}  |                              |
+```
+
+This pattern is used by exchanges, payment processors, and every production
+Cardano dApp that accepts on-chain payments. The key principles:
+
+1. **Return immediately** after recording the pending payment — don't block the
+   HTTP request on chain confirmation
+2. **Background job** polls Kupo/Ogmios for confirmation independently
+3. **Frontend polls** a status endpoint to detect when credits arrive
+4. **Timeout with grace** — if the tx isn't confirmed after 30 minutes, mark as
+   failed (the user can retry or the tx may have been dropped from the mempool)
+5. **Idempotent** — the same tx_hash can never credit twice (store in ledger
+   with the tx_hash as reference, check before crediting)
+
+The synchronous retry-with-backoff approach (`sleep(5s), retry, sleep(10s), retry`)
+is fragile because:
+- Block times are unpredictable (preview: 1-60s, mainnet: 1-40s)
+- Kupo indexing adds 1-10s on top
+- HTTP requests have timeouts that can expire before the chain confirms
+- Users close the browser during the wait, losing the retry state
+
 ---
 
 ## See Also
